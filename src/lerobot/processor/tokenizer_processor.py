@@ -24,6 +24,7 @@ token IDs and attention masks, which are then added to the observation dictionar
 from __future__ import annotations
 
 import logging
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -84,6 +85,10 @@ class TokenizerProcessorStep(ObservationProcessorStep):
 
     # Internal tokenizer instance (not part of the config)
     input_tokenizer: Any = field(default=None, init=False, repr=False)
+    _token_cache: OrderedDict[str, dict[str, torch.Tensor]] = field(
+        default_factory=OrderedDict, init=False, repr=False
+    )
+    _max_cache_size: int = field(default=2048, init=False, repr=False)
 
     def __post_init__(self):
         """
@@ -260,14 +265,47 @@ class TokenizerProcessorStep(ObservationProcessorStep):
         Returns:
             A dictionary containing tokenized 'input_ids' and 'attention_mask' as PyTorch tensors.
         """
-        return self.input_tokenizer(
-            text,
-            max_length=self.max_length,
-            truncation=self.truncation,
-            padding=self.padding,
-            padding_side=self.padding_side,
-            return_tensors="pt",
-        )
+        if isinstance(text, str):
+            text = [text]
+
+        missing_texts = []
+        seen_missing = set()
+        for prompt in text:
+            if prompt not in self._token_cache and prompt not in seen_missing:
+                missing_texts.append(prompt)
+                seen_missing.add(prompt)
+
+        if missing_texts:
+            tokenized_missing = self.input_tokenizer(
+                missing_texts,
+                max_length=self.max_length,
+                truncation=self.truncation,
+                padding=self.padding,
+                padding_side=self.padding_side,
+                return_tensors="pt",
+            )
+
+            for idx, prompt in enumerate(missing_texts):
+                self._token_cache[prompt] = {
+                    "input_ids": tokenized_missing["input_ids"][idx].clone(),
+                    "attention_mask": tokenized_missing["attention_mask"][idx].clone(),
+                }
+                self._token_cache.move_to_end(prompt)
+                while len(self._token_cache) > self._max_cache_size:
+                    self._token_cache.popitem(last=False)
+
+        input_ids = []
+        attention_mask = []
+        for prompt in text:
+            cached = self._token_cache[prompt]
+            self._token_cache.move_to_end(prompt)
+            input_ids.append(cached["input_ids"])
+            attention_mask.append(cached["attention_mask"])
+
+        return {
+            "input_ids": torch.stack(input_ids, dim=0),
+            "attention_mask": torch.stack(attention_mask, dim=0),
+        }
 
     def get_config(self) -> dict[str, Any]:
         """
