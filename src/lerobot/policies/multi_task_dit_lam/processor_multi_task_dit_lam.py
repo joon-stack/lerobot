@@ -89,7 +89,8 @@ class TeacherBoundaryStashAndTrimProcessorStep(ProcessorStep):
         trimmed_any = False
 
         for key, value in observation.items():
-            if not isinstance(value, torch.Tensor) or value.ndim < 3 or value.shape[1] < expected_seq_len:
+            has_explicit_time_axis = isinstance(value, torch.Tensor) and value.ndim in (3, 5)
+            if not has_explicit_time_axis or value.shape[1] < expected_seq_len:
                 new_observation[key] = value
                 continue
 
