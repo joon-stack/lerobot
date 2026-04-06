@@ -36,6 +36,7 @@ from lerobot.envs.utils import close_envs
 from lerobot.optim.factory import make_optimizer_and_scheduler
 from lerobot.policies.factory import make_policy, make_pre_post_processors
 from lerobot.policies.pretrained import PreTrainedPolicy
+from lerobot.processor import GPUImageTransformsProcessorStep, NormalizerProcessorStep
 from lerobot.rl.wandb_utils import WandBLogger
 from lerobot.scripts.lerobot_eval import eval_policy_all
 from lerobot.utils.import_utils import register_third_party_plugins
@@ -54,6 +55,45 @@ from lerobot.utils.utils import (
     init_logging,
     inside_slurm,
 )
+
+
+def _should_offload_image_transforms_to_gpu(cfg: TrainPipelineConfig, device: torch.device) -> bool:
+    return bool(
+        cfg.dataset.image_transforms.enable
+        and device.type == "cuda"
+        and cfg.policy is not None
+        and len(getattr(cfg.policy, "image_features", {})) > 0
+    )
+
+
+def _disable_dataset_image_transforms(dataset: Any) -> None:
+    if hasattr(dataset, "image_transforms"):
+        dataset.image_transforms = None
+    reader = getattr(dataset, "reader", None)
+    if reader is not None and hasattr(reader, "_image_transforms"):
+        reader._image_transforms = None
+
+
+def _insert_gpu_image_transform_step(preprocessor: Any, cfg: TrainPipelineConfig) -> None:
+    if any(isinstance(step, GPUImageTransformsProcessorStep) for step in preprocessor.steps):
+        return
+
+    image_keys = list(getattr(cfg.policy, "image_features", {}).keys())
+    if not image_keys:
+        return
+
+    gpu_step = GPUImageTransformsProcessorStep(
+        image_transforms_cfg=dataclasses.asdict(cfg.dataset.image_transforms),
+        image_keys=image_keys,
+    )
+
+    steps = list(preprocessor.steps)
+    insert_idx = next(
+        (idx for idx, step in enumerate(steps) if isinstance(step, NormalizerProcessorStep)),
+        len(steps),
+    )
+    steps.insert(insert_idx, gpu_step)
+    preprocessor.steps = steps
 
 
 def update_policy(
@@ -301,6 +341,11 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         **processor_kwargs,
         **postprocessor_kwargs,
     )
+    if _should_offload_image_transforms_to_gpu(cfg, device):
+        _disable_dataset_image_transforms(dataset)
+        _insert_gpu_image_transform_step(preprocessor, cfg)
+        if is_main_process:
+            logging.info("Offloading dataset image transforms to GPU preprocessor")
 
     if is_main_process:
         logging.info("Creating optimizer and scheduler")

@@ -51,6 +51,7 @@ from .hil_processor import (
     RewardClassifierProcessorStep,
     TimeLimitProcessorStep,
 )
+from .image_transform_processor import GPUImageTransformsProcessorStep
 from .normalize_processor import NormalizerProcessorStep, UnnormalizerProcessorStep, hotswap_stats
 from .observation_processor import VanillaObservationProcessorStep
 from .pipeline import (
@@ -96,6 +97,7 @@ __all__ = [
     "EnvAction",
     "EnvTransition",
     "GymHILAdapterProcessorStep",
+    "GPUImageTransformsProcessorStep",
     "GripperPenaltyProcessorStep",
     "hotswap_stats",
     "IdentityProcessorStep",
