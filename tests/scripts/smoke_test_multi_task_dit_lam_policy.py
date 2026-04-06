@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
 def create_train_batch(
     *,
     batch_size: int,
-    n_obs_steps: int,
+    obs_sequence_len: int,
     horizon: int,
     state_dim: int,
     action_dim: int,
@@ -53,8 +53,8 @@ def create_train_batch(
     obs_key: str,
 ) -> dict[str, torch.Tensor | list[str]]:
     return {
-        OBS_STATE: torch.randn(batch_size, n_obs_steps, state_dim),
-        obs_key: torch.rand(batch_size, n_obs_steps, 3, height, width),
+        OBS_STATE: torch.randn(batch_size, obs_sequence_len, state_dim),
+        obs_key: torch.rand(batch_size, obs_sequence_len, 3, height, width),
         ACTION: torch.randn(batch_size, horizon, action_dim),
         "task": [task] * batch_size,
     }
@@ -123,7 +123,7 @@ def main() -> None:
 
     train_batch = create_train_batch(
         batch_size=args.batch_size,
-        n_obs_steps=args.n_obs_steps,
+        obs_sequence_len=args.n_obs_steps + len(config.latent_boundary_offsets),
         horizon=args.horizon,
         state_dim=args.state_dim,
         action_dim=args.action_dim,
