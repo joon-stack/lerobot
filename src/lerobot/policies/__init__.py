@@ -16,6 +16,7 @@ from .act.configuration_act import ACTConfig as ACTConfig
 from .diffusion.configuration_diffusion import DiffusionConfig as DiffusionConfig
 from .groot.configuration_groot import GrootConfig as GrootConfig
 from .multi_task_dit.configuration_multi_task_dit import MultiTaskDiTConfig as MultiTaskDiTConfig
+from .multi_task_dit_lam.configuration_multi_task_dit_lam import MultiTaskDiTLAMConfig as MultiTaskDiTLAMConfig
 from .pi0.configuration_pi0 import PI0Config as PI0Config
 from .pi0_fast.configuration_pi0_fast import PI0FastConfig as PI0FastConfig
 from .pi05.configuration_pi05 import PI05Config as PI05Config
@@ -30,6 +31,7 @@ __all__ = [
     "ACTConfig",
     "DiffusionConfig",
     "MultiTaskDiTConfig",
+    "MultiTaskDiTLAMConfig",
     "PI0Config",
     "PI05Config",
     "PI0FastConfig",

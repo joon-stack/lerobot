@@ -32,6 +32,7 @@ from lerobot.policies.act.configuration_act import ACTConfig
 from lerobot.policies.diffusion.configuration_diffusion import DiffusionConfig
 from lerobot.policies.groot.configuration_groot import GrootConfig
 from lerobot.policies.multi_task_dit.configuration_multi_task_dit import MultiTaskDiTConfig
+from lerobot.policies.multi_task_dit_lam.configuration_multi_task_dit_lam import MultiTaskDiTLAMConfig
 from lerobot.policies.pi0.configuration_pi0 import PI0Config
 from lerobot.policies.pi05.configuration_pi05 import PI05Config
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -114,6 +115,10 @@ def get_policy_class(name: str) -> type[PreTrainedPolicy]:
         from lerobot.policies.multi_task_dit.modeling_multi_task_dit import MultiTaskDiTPolicy
 
         return MultiTaskDiTPolicy
+    elif name == "multi_task_dit_lam":
+        from lerobot.policies.multi_task_dit_lam.modeling_multi_task_dit_lam import MultiTaskDiTLAMPolicy
+
+        return MultiTaskDiTLAMPolicy
     elif name == "vqbet":
         from lerobot.policies.vqbet.modeling_vqbet import VQBeTPolicy
 
@@ -192,6 +197,8 @@ def make_policy_config(policy_type: str, **kwargs) -> PreTrainedConfig:
         return ACTConfig(**kwargs)
     elif policy_type == "multi_task_dit":
         return MultiTaskDiTConfig(**kwargs)
+    elif policy_type == "multi_task_dit_lam":
+        return MultiTaskDiTLAMConfig(**kwargs)
     elif policy_type == "vqbet":
         return VQBeTConfig(**kwargs)
     elif policy_type == "pi0":
@@ -334,6 +341,16 @@ def make_pre_post_processors(
         from lerobot.policies.act.processor_act import make_act_pre_post_processors
 
         processors = make_act_pre_post_processors(
+            config=policy_cfg,
+            dataset_stats=kwargs.get("dataset_stats"),
+        )
+
+    elif isinstance(policy_cfg, MultiTaskDiTLAMConfig):
+        from lerobot.policies.multi_task_dit_lam.processor_multi_task_dit_lam import (
+            make_multi_task_dit_lam_pre_post_processors,
+        )
+
+        processors = make_multi_task_dit_lam_pre_post_processors(
             config=policy_cfg,
             dataset_stats=kwargs.get("dataset_stats"),
         )
