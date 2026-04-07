@@ -8,9 +8,9 @@ set -euo pipefail
 
 DATASET_REPO="nikriz/pick_place_bowl"
 POLICY_REPO="nikriz/dp_so101_drawer_nvs3_ori"
-OUTPUT_DIR="/home/work/robotics/junhachun/lerobot_outputs/dp_so101_drawer_nvs3_ori"
-JOB_NAME="dp_so101_drawer_nvs3_ori"
-WANDB_PROJECT="so101_drawer_nvs"
+OUTPUT_DIR="outputs/dp_pick_place_bowl"
+JOB_NAME="dp_pick_place_bowl"
+WANDB_PROJECT="pick_place_bowl"
 WANDB_RUN_ID="azisy28x"
 
 cmd=(
