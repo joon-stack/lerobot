@@ -15,10 +15,12 @@ WANDB_RUN_ID="3zuj1pxc"
 
 cmd=(
   lerobot-train
-  --policy.type=smolvla
+  --policy.path=lerobot/smolvla_base
   --dataset.repo_id="${DATASET_REPO}"
   --dataset.video_backend=torchcodec
   --dataset.use_imagenet_stats=true
+  --policy.input_features=null
+  --policy.output_features=null
   --policy.device=cuda
   --policy.push_to_hub=true
   --policy.repo_id="${POLICY_REPO}"
@@ -45,8 +47,6 @@ cmd=(
   --policy.scheduler_warmup_steps=1000
   --policy.scheduler_decay_steps=30000
   --policy.scheduler_decay_lr=2.5e-6
-  --policy.vlm_model_name=HuggingFaceTB/SmolVLM2-500M-Video-Instruct
-  --policy.load_vlm_weights=true
   --policy.add_image_special_tokens=false
   --policy.attention_mode=cross_attn
   --policy.prefix_length=-1
