@@ -246,6 +246,28 @@ def test_fast_image_transforms_preserve_temporal_consistency(img_tensor_factory)
     torch.testing.assert_close(transformed[:, 1], transformed[:, 2])
 
 
+@pytest.mark.skipif(not is_kornia_available(), reason="kornia not installed")
+def test_fast_image_transforms_support_scalar_affine_degrees(img_tensor_factory):
+    img_tensor = img_tensor_factory()
+    batch = img_tensor.unsqueeze(0).repeat(2, 1, 1, 1)
+    tf_cfg = ImageTransformsConfig(
+        enable=True,
+        backend="gpu_fast",
+        max_num_transforms=1,
+        tfs={
+            "translation": ImageTransformConfig(
+                type="RandomAffine",
+                kwargs={"degrees": 0, "translate": (0.1, 0.1)},
+            )
+        },
+    )
+    tf_actual = FastImageTransforms(tf_cfg)
+    transformed = tf_actual(batch)
+
+    assert transformed.shape == batch.shape
+    assert torch.isfinite(transformed).all()
+
+
 @require_x86_64_kernel
 def test_get_image_transforms_random_order(img_tensor_factory):
     out_imgs = []

@@ -267,10 +267,26 @@ def is_kornia_available() -> bool:
 
 
 def _make_bounds(value: Any, name: str) -> tuple[float, float]:
-    if isinstance(value, collections.abc.Sequence) and len(value) == 2:
+    if isinstance(value, (int, float)):
+        scalar = float(value)
+        if name in {"degrees"}:
+            if scalar < 0:
+                raise ValueError(f"{name} must be non-negative when provided as a scalar.")
+            lower, upper = -scalar, scalar
+        elif name in {"brightness", "contrast", "saturation", "sharpness"}:
+            if scalar < 0:
+                raise ValueError(f"{name} must be non-negative when provided as a scalar.")
+            lower, upper = max(0.0, 1.0 - scalar), 1.0 + scalar
+        elif name == "hue":
+            if not -0.5 <= scalar <= 0.5:
+                raise ValueError(f"{name} scalar must be in [-0.5, 0.5].")
+            lower, upper = -abs(scalar), abs(scalar)
+        else:
+            raise TypeError(f"{name} scalar format is unsupported for the fast GPU backend.")
+    elif isinstance(value, collections.abc.Sequence) and len(value) == 2:
         lower, upper = float(value[0]), float(value[1])
     else:
-        raise TypeError(f"{name} must be provided as a [min, max] pair for the fast GPU backend.")
+        raise TypeError(f"{name} must be provided as a scalar or [min, max] pair for the fast GPU backend.")
     if lower > upper:
         raise ValueError(f"Invalid bounds for {name}: ({lower}, {upper})")
     return lower, upper
