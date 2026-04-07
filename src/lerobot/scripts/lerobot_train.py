@@ -30,6 +30,7 @@ from lerobot.configs import parser
 from lerobot.configs.train import TrainPipelineConfig
 from lerobot.datasets.factory import make_dataset
 from lerobot.datasets.sampler import EpisodeAwareSampler
+from lerobot.datasets.transforms import get_fast_image_transforms_incompatibility_reason
 from lerobot.datasets.utils import cycle
 from lerobot.envs.factory import make_env, make_env_pre_post_processors
 from lerobot.envs.utils import close_envs
@@ -57,13 +58,42 @@ from lerobot.utils.utils import (
 )
 
 
-def _should_offload_image_transforms_to_gpu(cfg: TrainPipelineConfig, device: torch.device) -> bool:
-    return bool(
+def _resolve_image_transform_backend(
+    cfg: TrainPipelineConfig, device: torch.device
+) -> tuple[str | None, str | None]:
+    if not (
         cfg.dataset.image_transforms.enable
-        and device.type == "cuda"
         and cfg.policy is not None
         and len(getattr(cfg.policy, "image_features", {})) > 0
-    )
+    ):
+        return None, None
+
+    backend = cfg.dataset.image_transforms.backend
+    if backend == "compatible":
+        if device.type == "cuda":
+            return "compatible", None
+        return None, "dataset.image_transforms.backend=compatible on CPU"
+
+    if device.type != "cuda":
+        if backend == "gpu_fast":
+            raise ValueError("dataset.image_transforms.backend=gpu_fast requires a CUDA device.")
+        return None, "CUDA device unavailable"
+
+    incompatibility = get_fast_image_transforms_incompatibility_reason(cfg.dataset.image_transforms)
+    if backend == "gpu_fast":
+        if incompatibility is not None:
+            raise ValueError(
+                "dataset.image_transforms.backend=gpu_fast was requested but is unavailable: "
+                f"{incompatibility}"
+            )
+        return "gpu_fast", None
+
+    if backend == "auto":
+        if incompatibility is None:
+            return "gpu_fast", None
+        return ("compatible", incompatibility) if device.type == "cuda" else (None, incompatibility)
+
+    raise ValueError(f"Unknown dataset.image_transforms.backend='{backend}'.")
 
 
 def _disable_dataset_image_transforms(dataset: Any) -> None:
@@ -341,11 +371,28 @@ def train(cfg: TrainPipelineConfig, accelerator: Accelerator | None = None):
         **processor_kwargs,
         **postprocessor_kwargs,
     )
-    if _should_offload_image_transforms_to_gpu(cfg, device):
+    image_transform_backend, image_transform_fallback_reason = _resolve_image_transform_backend(cfg, device)
+    if image_transform_backend in {"gpu_fast", "compatible"}:
         _disable_dataset_image_transforms(dataset)
         _insert_gpu_image_transform_step(preprocessor, cfg)
         if is_main_process:
-            logging.info("Offloading dataset image transforms to GPU preprocessor")
+            if image_transform_backend == "gpu_fast":
+                logging.info("Offloading dataset image transforms to the batched GPU preprocessor")
+            else:
+                logging.info(
+                    "Offloading dataset image transforms to the compatible GPU preprocessor (%s)",
+                    image_transform_fallback_reason or "forced compatible backend",
+                )
+    elif (
+        is_main_process
+        and cfg.dataset.image_transforms.enable
+        and cfg.policy is not None
+        and len(getattr(cfg.policy, "image_features", {})) > 0
+        and image_transform_fallback_reason is not None
+    ):
+        logging.info(
+            "Using compatible image transforms backend (%s)", image_transform_fallback_reason
+        )
 
     if is_main_process:
         logging.info("Creating optimizer and scheduler")

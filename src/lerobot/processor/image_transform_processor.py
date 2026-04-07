@@ -22,7 +22,13 @@ from typing import Any
 import torch
 
 from lerobot.configs.types import PipelineFeatureType, PolicyFeature
-from lerobot.datasets.transforms import ImageTransformConfig, ImageTransforms, ImageTransformsConfig
+from lerobot.datasets.transforms import (
+    FastImageTransforms,
+    ImageTransformConfig,
+    ImageTransforms,
+    ImageTransformsConfig,
+    get_fast_image_transforms_incompatibility_reason,
+)
 from lerobot.types import RobotObservation, TransitionKey
 
 from .pipeline import ObservationProcessorStep, ProcessorStepRegistry
@@ -48,13 +54,30 @@ class GPUImageTransformsProcessorStep(ObservationProcessorStep):
 
     def __post_init__(self):
         self._cfg = _build_image_transforms_config(self.image_transforms_cfg)
-        self._transforms = ImageTransforms(self._cfg)
+        self._backend = self._cfg.backend
+
+        fast_path_error = get_fast_image_transforms_incompatibility_reason(self._cfg)
+        if self._backend == "gpu_fast":
+            if fast_path_error is not None:
+                raise ValueError(
+                    "dataset.image_transforms.backend='gpu_fast' was requested but is unavailable: "
+                    f"{fast_path_error}"
+                )
+            self._transforms = FastImageTransforms(self._cfg)
+        elif self._backend == "auto" and fast_path_error is None:
+            self._backend = "gpu_fast"
+            self._transforms = FastImageTransforms(self._cfg)
+        else:
+            self._backend = "compatible"
+            self._transforms = ImageTransforms(self._cfg)
 
     def _should_apply(self) -> bool:
         action = self.transition.get(TransitionKey.ACTION)
         return isinstance(action, torch.Tensor)
 
     def _apply_per_sample(self, value: torch.Tensor) -> torch.Tensor:
+        if self._backend == "gpu_fast":
+            return self._transforms(value)
         if value.ndim == 5:
             # [B, T, C, H, W]: one sampled transform plan per sample, shared across its temporal axis.
             return torch.stack([self._transforms(sample) for sample in value], dim=0)

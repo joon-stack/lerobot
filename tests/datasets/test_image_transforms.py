@@ -22,11 +22,14 @@ from torchvision.transforms import v2
 from torchvision.transforms.v2 import functional as F  # noqa: N812
 
 from lerobot.datasets.transforms import (
+    FastImageTransforms,
     ImageTransformConfig,
     ImageTransforms,
     ImageTransformsConfig,
     RandomSubsetApply,
     SharpnessJitter,
+    get_fast_image_transforms_incompatibility_reason,
+    is_kornia_available,
     make_transform_from_config,
 )
 from lerobot.scripts.lerobot_imgtransform_viz import (
@@ -74,6 +77,32 @@ def test_get_image_transforms_no_transform_max_num_transforms_0(img_tensor_facto
     tf_cfg = ImageTransformsConfig(enable=True, max_num_transforms=0)
     tf_actual = ImageTransforms(tf_cfg)
     torch.testing.assert_close(tf_actual(img_tensor), img_tensor)
+
+
+def test_fast_image_transforms_random_order_reports_incompatibility():
+    tf_cfg = ImageTransformsConfig(
+        enable=True,
+        backend="gpu_fast",
+        random_order=True,
+        tfs={"brightness": ImageTransformConfig(type="ColorJitter", kwargs={"brightness": (0.5, 0.5)})},
+    )
+    incompatibility = get_fast_image_transforms_incompatibility_reason(tf_cfg)
+    assert incompatibility is not None
+
+
+def test_fast_image_transforms_multi_attribute_color_jitter_reports_incompatibility():
+    tf_cfg = ImageTransformsConfig(
+        enable=True,
+        backend="gpu_fast",
+        tfs={
+            "color": ImageTransformConfig(
+                type="ColorJitter",
+                kwargs={"brightness": (0.5, 0.5), "contrast": (0.5, 0.5)},
+            )
+        },
+    )
+    incompatibility = get_fast_image_transforms_incompatibility_reason(tf_cfg)
+    assert incompatibility is not None
 
 
 @pytest.mark.parametrize("min_max", [(0.5, 0.5), (2.0, 2.0)])
@@ -197,6 +226,24 @@ def test_get_image_transforms_max_num_transforms(img_tensor_factory):
         ]
     )
     torch.testing.assert_close(tf_actual(img_tensor), tf_expected(img_tensor))
+
+
+@pytest.mark.skipif(not is_kornia_available(), reason="kornia not installed")
+def test_fast_image_transforms_preserve_temporal_consistency(img_tensor_factory):
+    img_tensor = img_tensor_factory()
+    video = img_tensor.unsqueeze(0).unsqueeze(0).repeat(2, 3, 1, 1, 1)
+    tf_cfg = ImageTransformsConfig(
+        enable=True,
+        backend="gpu_fast",
+        max_num_transforms=1,
+        tfs={"brightness": ImageTransformConfig(type="ColorJitter", kwargs={"brightness": (0.5, 0.5)})},
+    )
+    tf_actual = FastImageTransforms(tf_cfg)
+    transformed = tf_actual(video)
+
+    assert transformed.shape == video.shape
+    torch.testing.assert_close(transformed[:, 0], transformed[:, 1])
+    torch.testing.assert_close(transformed[:, 1], transformed[:, 2])
 
 
 @require_x86_64_kernel

@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import collections
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -24,6 +25,16 @@ from torchvision.transforms.v2 import (
     Transform,
     functional as F,  # noqa: N812
 )
+
+try:
+    import kornia.enhance as KE
+    import kornia.geometry.transform as KGT
+
+    _KORNIA_IMPORT_ERROR = None
+except ImportError as exc:  # pragma: no cover - covered by compatibility tests when kornia is installed
+    KE = None
+    KGT = None
+    _KORNIA_IMPORT_ERROR = exc
 
 
 class RandomSubsetApply(Transform):
@@ -179,6 +190,11 @@ class ImageTransformsConfig:
     # By default, transforms are applied in Torchvision's suggested order (shown below).
     # Set this to True to apply them in a random order.
     random_order: bool = False
+    # Controls where image transforms are executed during training.
+    # - "compatible": keep the original transform implementation and semantics.
+    # - "gpu_fast": use the batched Kornia fast path (requires CUDA + Kornia + supported transforms).
+    # - "auto": pick "gpu_fast" only when it is safe to do so, otherwise fall back to "compatible".
+    backend: str = "auto"
     tfs: dict[str, ImageTransformConfig] = field(
         default_factory=lambda: {
             "brightness": ImageTransformConfig(
@@ -213,6 +229,305 @@ class ImageTransformsConfig:
             ),
         }
     )
+
+
+FAST_IMAGE_TRANSFORM_BACKENDS = {"auto", "compatible", "gpu_fast"}
+
+
+@dataclass(frozen=True)
+class FastTransformSpec:
+    name: str
+    kind: str
+    weight: float
+    kwargs: dict[str, Any]
+
+
+@dataclass
+class FastAugPlan:
+    selected_mask: torch.Tensor
+    params: dict[str, dict[str, torch.Tensor]]
+
+    def repeat_interleave(self, repeats: int) -> "FastAugPlan":
+        if repeats == 1:
+            return self
+        return FastAugPlan(
+            selected_mask=self.selected_mask.repeat_interleave(repeats, dim=0),
+            params={
+                name: {
+                    key: value.repeat_interleave(repeats, dim=0)
+                    for key, value in transform_params.items()
+                }
+                for name, transform_params in self.params.items()
+            },
+        )
+
+
+def is_kornia_available() -> bool:
+    return KE is not None and KGT is not None
+
+
+def _make_bounds(value: Any, name: str) -> tuple[float, float]:
+    if isinstance(value, collections.abc.Sequence) and len(value) == 2:
+        lower, upper = float(value[0]), float(value[1])
+    else:
+        raise TypeError(f"{name} must be provided as a [min, max] pair for the fast GPU backend.")
+    if lower > upper:
+        raise ValueError(f"Invalid bounds for {name}: ({lower}, {upper})")
+    return lower, upper
+
+
+def _make_affine_translation_bounds(value: Any) -> tuple[float, float]:
+    if not isinstance(value, collections.abc.Sequence) or len(value) != 2:
+        raise TypeError("RandomAffine translate must be a pair of fractions for the fast GPU backend.")
+    tx, ty = float(value[0]), float(value[1])
+    if tx < 0 or ty < 0:
+        raise ValueError("RandomAffine translate bounds must be non-negative fractions.")
+    return tx, ty
+
+
+def _parse_fast_transform_spec(name: str, cfg: ImageTransformConfig) -> FastTransformSpec:
+    if cfg.weight <= 0:
+        raise ValueError(f"Transform '{name}' has non-positive weight and should not be parsed.")
+
+    if cfg.type == "ColorJitter":
+        supported_keys = [key for key in ("brightness", "contrast", "saturation", "hue") if key in cfg.kwargs]
+        if len(supported_keys) != 1 or len(cfg.kwargs) != 1:
+            raise ValueError(
+                f"Fast GPU backend only supports single-attribute ColorJitter entries, got {cfg.kwargs}."
+            )
+        return FastTransformSpec(name=name, kind=supported_keys[0], weight=cfg.weight, kwargs=cfg.kwargs)
+
+    if cfg.type == "SharpnessJitter":
+        if set(cfg.kwargs) != {"sharpness"}:
+            raise ValueError(
+                f"Fast GPU backend only supports SharpnessJitter(sharpness=...), got {cfg.kwargs}."
+            )
+        return FastTransformSpec(name=name, kind="sharpness", weight=cfg.weight, kwargs=cfg.kwargs)
+
+    if cfg.type == "RandomRotation":
+        if set(cfg.kwargs) != {"degrees"}:
+            raise ValueError(
+                f"Fast GPU backend only supports RandomRotation(degrees=...), got {cfg.kwargs}."
+            )
+        return FastTransformSpec(name=name, kind="rotation", weight=cfg.weight, kwargs=cfg.kwargs)
+
+    if cfg.type == "RandomAffine":
+        supported_keys = {"degrees", "translate"}
+        if not set(cfg.kwargs).issubset(supported_keys):
+            raise ValueError(
+                "Fast GPU backend only supports RandomAffine with degrees and optional translate."
+            )
+        if "degrees" not in cfg.kwargs:
+            raise ValueError("Fast GPU backend requires RandomAffine degrees to be specified.")
+        return FastTransformSpec(name=name, kind="affine", weight=cfg.weight, kwargs=cfg.kwargs)
+
+    raise ValueError(
+        f"Fast GPU backend does not support transform '{name}' with type '{cfg.type}'."
+    )
+
+
+def get_fast_image_transforms_incompatibility_reason(cfg: ImageTransformsConfig) -> str | None:
+    if not cfg.enable:
+        return "image transforms are disabled"
+    if cfg.backend not in FAST_IMAGE_TRANSFORM_BACKENDS:
+        return f"unknown image transform backend '{cfg.backend}'"
+    active_cfgs = [tf_cfg for tf_cfg in cfg.tfs.values() if tf_cfg.weight > 0.0]
+    if len(active_cfgs) == 0 or cfg.max_num_transforms <= 0:
+        return None
+    if not is_kornia_available():
+        return f"kornia is not installed: {_KORNIA_IMPORT_ERROR}"
+    if cfg.random_order:
+        return "fast GPU backend does not support random_order=true"
+
+    try:
+        for name, tf_cfg in cfg.tfs.items():
+            if tf_cfg.weight <= 0.0:
+                continue
+            _parse_fast_transform_spec(name, tf_cfg)
+    except (TypeError, ValueError) as exc:
+        return str(exc)
+    return None
+
+
+class FastImageTransforms:
+    """Batched GPU image transforms with the same public recipe as ImageTransforms."""
+
+    def __init__(self, cfg: ImageTransformsConfig) -> None:
+        incompatibility = get_fast_image_transforms_incompatibility_reason(cfg)
+        if incompatibility is not None:
+            raise ValueError(f"Fast GPU image transforms are unavailable: {incompatibility}")
+
+        self._cfg = cfg
+        self.specs = [
+            _parse_fast_transform_spec(name, tf_cfg)
+            for name, tf_cfg in cfg.tfs.items()
+            if tf_cfg.weight > 0.0
+        ]
+        self._weights = torch.tensor([spec.weight for spec in self.specs], dtype=torch.float32)
+        self._n_subset = min(len(self.specs), cfg.max_num_transforms)
+
+    def __call__(self, value: torch.Tensor) -> torch.Tensor:
+        if not self._cfg.enable or self._n_subset == 0:
+            return value
+        if value.ndim == 5:
+            batch_size, horizon, channels, height, width = value.shape
+            images = value.reshape(batch_size * horizon, channels, height, width)
+            plan = self._sample_plan(batch_size, height, width, value.device, value.dtype)
+            output = self._apply_plan(images, plan.repeat_interleave(horizon))
+            return output.reshape(batch_size, horizon, channels, height, width)
+        if value.ndim == 4:
+            batch_size, _, height, width = value.shape
+            plan = self._sample_plan(batch_size, height, width, value.device, value.dtype)
+            return self._apply_plan(value, plan)
+        if value.ndim == 3:
+            return self(value.unsqueeze(0)).squeeze(0)
+        return value
+
+    def _sample_uniform(
+        self, bounds: tuple[float, float], batch_size: int, device: torch.device, dtype: torch.dtype
+    ) -> torch.Tensor:
+        lower, upper = bounds
+        return torch.empty(batch_size, device=device, dtype=dtype).uniform_(lower, upper)
+
+    def _sample_plan(
+        self,
+        batch_size: int,
+        height: int,
+        width: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> FastAugPlan:
+        weights = self._weights.to(device=device)
+        selected_indices = torch.multinomial(weights.expand(batch_size, -1), self._n_subset, replacement=False)
+        selected_mask = torch.zeros(batch_size, len(self.specs), dtype=torch.bool, device=device)
+        selected_mask.scatter_(1, selected_indices, True)
+
+        params: dict[str, dict[str, torch.Tensor]] = {}
+        for spec in self.specs:
+            if spec.kind == "brightness":
+                params[spec.name] = {
+                    "factor": self._sample_uniform(
+                        _make_bounds(spec.kwargs["brightness"], "brightness"),
+                        batch_size,
+                        device,
+                        dtype,
+                    )
+                }
+            elif spec.kind == "contrast":
+                params[spec.name] = {
+                    "factor": self._sample_uniform(
+                        _make_bounds(spec.kwargs["contrast"], "contrast"),
+                        batch_size,
+                        device,
+                        dtype,
+                    )
+                }
+            elif spec.kind == "saturation":
+                params[spec.name] = {
+                    "factor": self._sample_uniform(
+                        _make_bounds(spec.kwargs["saturation"], "saturation"),
+                        batch_size,
+                        device,
+                        dtype,
+                    )
+                }
+            elif spec.kind == "hue":
+                hue_factor = self._sample_uniform(
+                    _make_bounds(spec.kwargs["hue"], "hue"), batch_size, device, dtype
+                )
+                params[spec.name] = {"factor": hue_factor * math.tau}
+            elif spec.kind == "sharpness":
+                params[spec.name] = {
+                    "factor": self._sample_uniform(
+                        _make_bounds(spec.kwargs["sharpness"], "sharpness"),
+                        batch_size,
+                        device,
+                        dtype,
+                    )
+                }
+            elif spec.kind == "rotation":
+                params[spec.name] = {
+                    "angle": self._sample_uniform(
+                        _make_bounds(spec.kwargs["degrees"], "degrees"),
+                        batch_size,
+                        device,
+                        dtype,
+                    )
+                }
+            elif spec.kind == "affine":
+                angle = self._sample_uniform(
+                    _make_bounds(spec.kwargs["degrees"], "degrees"), batch_size, device, dtype
+                )
+                if "translate" in spec.kwargs:
+                    tx_bound, ty_bound = _make_affine_translation_bounds(spec.kwargs["translate"])
+                    translations = torch.empty(batch_size, 2, device=device, dtype=dtype)
+                    translations[:, 0].uniform_(-tx_bound * width, tx_bound * width)
+                    translations[:, 1].uniform_(-ty_bound * height, ty_bound * height)
+                else:
+                    translations = torch.zeros(batch_size, 2, device=device, dtype=dtype)
+                params[spec.name] = {"angle": angle, "translation": translations}
+            else:  # pragma: no cover - guarded by compatibility checks
+                raise ValueError(f"Unsupported fast transform kind '{spec.kind}'.")
+
+        return FastAugPlan(selected_mask=selected_mask, params=params)
+
+    @staticmethod
+    def _broadcast_factor(factor: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
+        return factor.view(-1, *([1] * (images.ndim - 1)))
+
+    def _apply_plan(self, images: torch.Tensor, plan: FastAugPlan) -> torch.Tensor:
+        transformed = images
+        height, width = transformed.shape[-2:]
+
+        for idx, spec in enumerate(self.specs):
+            active_mask = plan.selected_mask[:, idx]
+            if not active_mask.any():
+                continue
+
+            params = plan.params[spec.name]
+            if spec.kind == "brightness":
+                candidate = (transformed * self._broadcast_factor(params["factor"], transformed)).clamp(0.0, 1.0)
+            elif spec.kind == "contrast":
+                candidate = KE.adjust_contrast_with_mean_subtraction(transformed, params["factor"]).clamp(0.0, 1.0)
+            elif spec.kind == "saturation":
+                candidate = KE.adjust_saturation(transformed, params["factor"]).clamp(0.0, 1.0)
+            elif spec.kind == "hue":
+                candidate = KE.adjust_hue(transformed, params["factor"]).clamp(0.0, 1.0)
+            elif spec.kind == "sharpness":
+                candidate = KE.sharpness(transformed, params["factor"]).clamp(0.0, 1.0)
+            elif spec.kind == "rotation":
+                candidate = KGT.rotate(
+                    transformed,
+                    params["angle"],
+                    mode="bilinear",
+                    padding_mode="zeros",
+                    align_corners=True,
+                )
+            elif spec.kind == "affine":
+                center = transformed.new_tensor([(width - 1) / 2.0, (height - 1) / 2.0]).repeat(
+                    transformed.shape[0], 1
+                )
+                scale = torch.ones(transformed.shape[0], 2, device=transformed.device, dtype=transformed.dtype)
+                matrix = KGT.get_affine_matrix2d(
+                    params["translation"],
+                    center,
+                    scale,
+                    params["angle"],
+                )
+                candidate = KGT.warp_affine(
+                    transformed,
+                    matrix[:, :2, :],
+                    dsize=(height, width),
+                    mode="bilinear",
+                    padding_mode="zeros",
+                    align_corners=True,
+                )
+            else:  # pragma: no cover - guarded by compatibility checks
+                raise ValueError(f"Unsupported fast transform kind '{spec.kind}'.")
+
+            transformed = torch.where(active_mask.view(-1, 1, 1, 1), candidate, transformed)
+
+        return transformed
 
 
 def make_transform_from_config(cfg: ImageTransformConfig):
