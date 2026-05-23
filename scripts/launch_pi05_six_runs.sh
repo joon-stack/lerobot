@@ -93,10 +93,10 @@ echo "[launch] LOG_DIR=${LOG_DIR}"
 echo "[launch] mode=sequential distributed; one job uses all listed GPUs"
 
 run_job "joon-stack/pick_place_nanobanana" "joon-stack/pi05_pnp_nanobanana_top" "outputs/pi05_pnp_nanobanana_top" "pi05_pnp_nanobanana_top" "pnp_nanobanana_top" "${TOP_FEATURES}"
-run_job "joon-stack/pick_place_nanobanana" "joon-stack/pi05_pnp_nanobanana_top_wrist" "outputs/pi05_pnp_nanobanana_top_wrist" "pi05_pnp_nanobanana_top_wrist" "pnp_nanobanana_top_wrist" "${TOP_WRIST_FEATURES}"
 run_job "joon-stack/stack_cup_merged" "joon-stack/pi05_stack_cup_top" "outputs/pi05_stack_cup_top" "pi05_stack_cup_top" "stack_cup_top" "${TOP_FEATURES}"
-run_job "joon-stack/stack_cup_merged" "joon-stack/pi05_stack_cup_top_wrist" "outputs/pi05_stack_cup_top_wrist" "pi05_stack_cup_top_wrist" "stack_cup_top_wrist" "${TOP_WRIST_FEATURES}"
 run_job "HWAN7919/put_banana_in_pot_merge" "joon-stack/pi05_put_banana_in_pot_top" "outputs/pi05_put_banana_in_pot_top" "pi05_put_banana_in_pot_top" "put_banana_in_pot_top" "${TOP_FEATURES}"
+run_job "joon-stack/pick_place_nanobanana" "joon-stack/pi05_pnp_nanobanana_top_wrist" "outputs/pi05_pnp_nanobanana_top_wrist" "pi05_pnp_nanobanana_top_wrist" "pnp_nanobanana_top_wrist" "${TOP_WRIST_FEATURES}"
+run_job "joon-stack/stack_cup_merged" "joon-stack/pi05_stack_cup_top_wrist" "outputs/pi05_stack_cup_top_wrist" "pi05_stack_cup_top_wrist" "stack_cup_top_wrist" "${TOP_WRIST_FEATURES}"
 run_job "HWAN7919/put_banana_in_pot_merge" "joon-stack/pi05_put_banana_in_pot_top_wrist" "outputs/pi05_put_banana_in_pot_top_wrist" "pi05_put_banana_in_pot_top_wrist" "put_banana_in_pot_top_wrist" "${TOP_WRIST_FEATURES}"
 
 echo "[launch] all jobs finished"

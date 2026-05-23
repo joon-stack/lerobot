@@ -90,10 +90,10 @@ echo "[launch] LOG_DIR=${LOG_DIR}"
 echo "[launch] mode=sequential distributed; one job uses all listed GPUs"
 
 run_job "joon-stack/pick_place_nanobanana" "joon-stack/smolvla_pnp_nanobanana_top" "outputs/smolvla_pnp_nanobanana_top" "smolvla_pnp_nanobanana_top" "smolvla_pnp_nanobanana_top" "${TOP_FEATURES}"
-run_job "joon-stack/pick_place_nanobanana" "joon-stack/smolvla_pnp_nanobanana_top_wrist" "outputs/smolvla_pnp_nanobanana_top_wrist" "smolvla_pnp_nanobanana_top_wrist" "smolvla_pnp_nanobanana_top_wrist" "${TOP_WRIST_FEATURES}"
 run_job "joon-stack/stack_cup_merged" "joon-stack/smolvla_stack_cup_top" "outputs/smolvla_stack_cup_top" "smolvla_stack_cup_top" "smolvla_stack_cup_top" "${TOP_FEATURES}"
-run_job "joon-stack/stack_cup_merged" "joon-stack/smolvla_stack_cup_top_wrist" "outputs/smolvla_stack_cup_top_wrist" "smolvla_stack_cup_top_wrist" "smolvla_stack_cup_top_wrist" "${TOP_WRIST_FEATURES}"
 run_job "HWAN7919/put_banana_in_pot_merge" "joon-stack/smolvla_put_banana_in_pot_top" "outputs/smolvla_put_banana_in_pot_top" "smolvla_put_banana_in_pot_top" "smolvla_put_banana_in_pot_top" "${TOP_FEATURES}"
+run_job "joon-stack/pick_place_nanobanana" "joon-stack/smolvla_pnp_nanobanana_top_wrist" "outputs/smolvla_pnp_nanobanana_top_wrist" "smolvla_pnp_nanobanana_top_wrist" "smolvla_pnp_nanobanana_top_wrist" "${TOP_WRIST_FEATURES}"
+run_job "joon-stack/stack_cup_merged" "joon-stack/smolvla_stack_cup_top_wrist" "outputs/smolvla_stack_cup_top_wrist" "smolvla_stack_cup_top_wrist" "smolvla_stack_cup_top_wrist" "${TOP_WRIST_FEATURES}"
 run_job "HWAN7919/put_banana_in_pot_merge" "joon-stack/smolvla_put_banana_in_pot_top_wrist" "outputs/smolvla_put_banana_in_pot_top_wrist" "smolvla_put_banana_in_pot_top_wrist" "smolvla_put_banana_in_pot_top_wrist" "${TOP_WRIST_FEATURES}"
 
 echo "[launch] all jobs finished"
