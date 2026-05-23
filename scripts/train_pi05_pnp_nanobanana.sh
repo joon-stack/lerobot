@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
+cd "${REPO_ROOT}"
+
 # Usage:
 #   bash scripts/train_pi05_pnp_nanobanana.sh
 # Optional:
@@ -17,6 +21,9 @@ OUTPUT_DIR="${OUTPUT_DIR:-outputs/pi05_pnp_nanobanana_top}"
 JOB_NAME="${JOB_NAME:-pi05_pnp_nanobanana}"
 WANDB_PROJECT="${WANDB_PROJECT:-pnp_nanobanana}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
+TRAIN_STEPS="${TRAIN_STEPS:-5000}"
+SAVE_FREQ="${SAVE_FREQ:-1000}"
+INPUT_FEATURES=${INPUT_FEATURES:-'{"observation.state":{"type":"STATE","shape":[7]},"observation.images.top":{"type":"VISUAL","shape":[3,480,640]}}'}
 
 for arg in "$@"; do
   case "${arg}" in
@@ -120,7 +127,7 @@ cmd=(
   --policy.n_action_steps=50
   --policy.image_resolution='[224,224]'
   --policy.empty_cameras=0
-  --policy.input_features='{"observation.state":{"type":"STATE","shape":[7]},"observation.images.top":{"type":"VISUAL","shape":[3,480,640]}}'
+  --policy.input_features="${INPUT_FEATURES}"
   --policy.optimizer_lr=2.5e-5
   --policy.optimizer_betas='[0.9,0.95]'
   --policy.optimizer_weight_decay=0.01
@@ -134,11 +141,11 @@ cmd=(
   --seed=1000
   --num_workers=8
   --batch_size="${BATCH_SIZE}"
-  --steps=5000
+  --steps="${TRAIN_STEPS}"
   --eval_freq=0
   --log_freq=20
   --save_checkpoint=true
-  --save_freq=1000
+  --save_freq="${SAVE_FREQ}"
   --use_policy_training_preset=true
   --wandb.enable=true
   --wandb.disable_artifact=true
