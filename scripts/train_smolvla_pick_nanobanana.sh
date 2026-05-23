@@ -25,6 +25,14 @@ TRAIN_STEPS="${TRAIN_STEPS:-5000}"
 SAVE_FREQ="${SAVE_FREQ:-1000}"
 INPUT_FEATURES=${INPUT_FEATURES:-'{"observation.state":{"type":"STATE","shape":[7]},"observation.images.top":{"type":"VISUAL","shape":[3,480,640]}}'}
 
+USE_ACCELERATE="${USE_ACCELERATE:-${ACCELERATE_LAUNCH:-0}}"
+ACCELERATE_BIN="${ACCELERATE_BIN:-accelerate}"
+ACCELERATE_NUM_PROCESSES="${ACCELERATE_NUM_PROCESSES:-}"
+ACCELERATE_GPU_IDS="${ACCELERATE_GPU_IDS:-}"
+ACCELERATE_MIXED_PRECISION="${ACCELERATE_MIXED_PRECISION:-no}"
+ACCELERATE_MAIN_PROCESS_PORT="${ACCELERATE_MAIN_PROCESS_PORT:-}"
+ACCELERATE_MULTI_GPU="${ACCELERATE_MULTI_GPU:-0}"
+
 for arg in "$@"; do
   case "${arg}" in
     --dataset.repo_id|--dataset.repo_id=*|--dataset.root|--dataset.root=*|--dataset.revision|--dataset.revision=*)
@@ -171,4 +179,32 @@ cmd=(
   --wandb.project="${WANDB_PROJECT}"
 )
 
-"${cmd[@]}" "$@"
+if [[ "${USE_ACCELERATE}" == "1" ]]; then
+  lerobot_train_bin="$(command -v lerobot-train)"
+  cmd[0]="${lerobot_train_bin}"
+
+  launch_cmd=("${ACCELERATE_BIN}" launch)
+  if [[ "${ACCELERATE_MULTI_GPU}" == "1" ]]; then
+    launch_cmd+=(--multi_gpu)
+  fi
+  if [[ -n "${ACCELERATE_NUM_PROCESSES}" ]]; then
+    launch_cmd+=(--num_processes="${ACCELERATE_NUM_PROCESSES}")
+  fi
+  if [[ -n "${ACCELERATE_GPU_IDS}" ]]; then
+    launch_cmd+=(--gpu_ids="${ACCELERATE_GPU_IDS}")
+  fi
+  if [[ -n "${ACCELERATE_MIXED_PRECISION}" ]]; then
+    launch_cmd+=(--mixed_precision="${ACCELERATE_MIXED_PRECISION}")
+  fi
+  if [[ -n "${ACCELERATE_MAIN_PROCESS_PORT}" ]]; then
+    launch_cmd+=(--main_process_port="${ACCELERATE_MAIN_PROCESS_PORT}")
+  fi
+
+  echo "== Accelerate launch =="
+  echo "ACCELERATE_NUM_PROCESSES=${ACCELERATE_NUM_PROCESSES:-<accelerate default>}"
+  echo "ACCELERATE_GPU_IDS=${ACCELERATE_GPU_IDS:-<accelerate default>}"
+  echo "PER_DEVICE_BATCH_SIZE=${BATCH_SIZE}"
+  "${launch_cmd[@]}" "${cmd[@]}" "$@"
+else
+  "${cmd[@]}" "$@"
+fi
