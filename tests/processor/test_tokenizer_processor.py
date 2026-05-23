@@ -95,6 +95,22 @@ def mock_tokenizer():
 
 
 @require_package("transformers")
+def test_token_cache_preserves_current_batch_prompts_during_eviction(mock_tokenizer):
+    """Current batch prompts must remain cached until the batch has been stacked."""
+    processor = TokenizerProcessorStep(tokenizer=mock_tokenizer, max_length=6)
+    processor._max_cache_size = 3
+
+    processor._tokenize_text(["keep", "old1", "old2"])
+    tokenized = processor._tokenize_text(["keep", "new1", "new2"])
+
+    assert tokenized["input_ids"].shape == (3, 6)
+    assert tokenized["attention_mask"].shape == (3, 6)
+    assert "keep" in processor._token_cache
+    assert "new1" in processor._token_cache
+    assert "new2" in processor._token_cache
+
+
+@require_package("transformers")
 @patch("lerobot.processor.tokenizer_processor.AutoTokenizer")
 def test_basic_tokenization(mock_auto_tokenizer):
     """Test basic string tokenization functionality."""

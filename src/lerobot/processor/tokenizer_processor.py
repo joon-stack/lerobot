@@ -268,6 +268,7 @@ class TokenizerProcessorStep(ObservationProcessorStep):
         if isinstance(text, str):
             text = [text]
 
+        protected_prompts = set(text)
         missing_texts = []
         seen_missing = set()
         for prompt in text:
@@ -292,7 +293,12 @@ class TokenizerProcessorStep(ObservationProcessorStep):
                 }
                 self._token_cache.move_to_end(prompt)
                 while len(self._token_cache) > self._max_cache_size:
-                    self._token_cache.popitem(last=False)
+                    for cached_prompt in list(self._token_cache.keys()):
+                        if cached_prompt not in protected_prompts:
+                            del self._token_cache[cached_prompt]
+                            break
+                    else:
+                        break
 
         input_ids = []
         attention_mask = []
