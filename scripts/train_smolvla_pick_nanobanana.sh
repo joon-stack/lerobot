@@ -6,9 +6,9 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 cd "${REPO_ROOT}"
 
 # Usage:
-#   bash scripts/train_pi05_pnp_nanobanana.sh
+#   bash scripts/train_smolvla_pick_nanobanana.sh
 # Optional:
-#   POLICY_REPO=joon-stack/my_policy BATCH_SIZE=32 bash scripts/train_pi05_pnp_nanobanana.sh
+#   POLICY_REPO=joon-stack/my_policy BATCH_SIZE=32 bash scripts/train_smolvla_pick_nanobanana.sh
 
 DATASET_REPO="${DATASET_REPO:-joon-stack/pick_place_nanobanana}"
 DATASET_ROOT="${DATASET_ROOT:-}"
@@ -16,9 +16,9 @@ DATASET_REVISION="${DATASET_REVISION:-}"
 DATASET_VIDEO_BACKEND="pyav"
 export DATASET_REPO DATASET_ROOT DATASET_REVISION DATASET_VIDEO_BACKEND
 
-POLICY_REPO="${POLICY_REPO:-joon-stack/pi05_pnp_nanobanana}"
-OUTPUT_DIR="${OUTPUT_DIR:-outputs/pi05_pnp_nanobanana_top}"
-JOB_NAME="${JOB_NAME:-pi05_pnp_nanobanana}"
+POLICY_REPO="${POLICY_REPO:-joon-stack/smolvla_pnp_nanobanana}"
+OUTPUT_DIR="${OUTPUT_DIR:-outputs/smolvla_pnp_nanobanana_top}"
+JOB_NAME="${JOB_NAME:-smolvla_pnp_nanobanana}"
 WANDB_PROJECT="${WANDB_PROJECT:-pnp_nanobanana}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
 TRAIN_STEPS="${TRAIN_STEPS:-5000}"
@@ -109,38 +109,56 @@ fi
 
 cmd=(
   lerobot-train
-  --policy.type=pi05
-  --policy.pretrained_path=lerobot/pi05_base
+  --policy.path=lerobot/smolvla_base
   --dataset.repo_id="${DATASET_REPO}"
   "${dataset_root_args[@]}"
   "${dataset_revision_args[@]}"
   --dataset.video_backend="${DATASET_VIDEO_BACKEND}"
-  --dataset.use_imagenet_stats=false
+  --dataset.use_imagenet_stats=true
+  --policy.input_features="${INPUT_FEATURES}"
+  --policy.output_features=null
   --policy.device=cuda
-  --policy.dtype=bfloat16
-  --policy.gradient_checkpointing=true
-  --policy.compile_model=true
-  --policy.repo_id="${POLICY_REPO}"
   --policy.push_to_hub=true
   --policy.private=false
+  --policy.repo_id="${POLICY_REPO}"
   --policy.n_obs_steps=1
   --policy.chunk_size=50
   --policy.n_action_steps=50
-  --policy.image_resolution='[224,224]'
+  --policy.max_state_dim=32
+  --policy.max_action_dim=32
+  --policy.resize_imgs_with_padding='[512,512]'
   --policy.empty_cameras=0
-  --policy.input_features="${INPUT_FEATURES}"
-  --policy.optimizer_lr=2.5e-5
+  --policy.adapt_to_pi_aloha=false
+  --policy.use_delta_joint_actions_aloha=false
+  --policy.tokenizer_max_length=48
+  --policy.num_steps=10
+  --policy.use_cache=true
+  --policy.freeze_vision_encoder=true
+  --policy.train_expert_only=true
+  --policy.train_state_proj=true
+  --policy.optimizer_lr=1e-4
   --policy.optimizer_betas='[0.9,0.95]'
-  --policy.optimizer_weight_decay=0.01
-  --policy.optimizer_grad_clip_norm=1.0
+  --policy.optimizer_eps=1e-8
+  --policy.optimizer_weight_decay=1e-10
+  --policy.optimizer_grad_clip_norm=10
   --policy.scheduler_warmup_steps=1000
   --policy.scheduler_decay_steps=30000
   --policy.scheduler_decay_lr=2.5e-6
+  --policy.add_image_special_tokens=false
+  --policy.attention_mode=cross_attn
+  --policy.prefix_length=-1
+  --policy.pad_language_to=longest
+  --policy.num_expert_layers=-1
+  --policy.num_vlm_layers=16
+  --policy.self_attn_every_n_layers=2
+  --policy.expert_width_multiplier=0.75
+  --policy.min_period=0.004
+  --policy.max_period=4.0
   --output_dir="${OUTPUT_DIR}"
   --job_name="${JOB_NAME}"
   --resume=false
   --seed=1000
-  --num_workers=8
+  --num_workers=4
   --batch_size="${BATCH_SIZE}"
   --steps="${TRAIN_STEPS}"
   --eval_freq=0
