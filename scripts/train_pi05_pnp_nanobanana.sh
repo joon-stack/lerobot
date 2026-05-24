@@ -17,6 +17,7 @@ DATASET_VIDEO_BACKEND="pyav"
 export DATASET_REPO DATASET_ROOT DATASET_REVISION DATASET_VIDEO_BACKEND
 
 POLICY_REPO="${POLICY_REPO:-joon-stack/pi05_pnp_nanobanana}"
+POLICY_PUSH_TO_HUB="${POLICY_PUSH_TO_HUB:-true}"
 OUTPUT_DIR="${OUTPUT_DIR:-outputs/pi05_pnp_nanobanana_top}"
 JOB_NAME="${JOB_NAME:-pi05_pnp_nanobanana}"
 WANDB_PROJECT="${WANDB_PROJECT:-pnp_nanobanana}"
@@ -129,7 +130,7 @@ cmd=(
   --policy.gradient_checkpointing=true
   --policy.compile_model=true
   --policy.repo_id="${POLICY_REPO}"
-  --policy.push_to_hub=true
+  --policy.push_to_hub="${POLICY_PUSH_TO_HUB}"
   --policy.private=false
   --policy.n_obs_steps=1
   --policy.chunk_size=50
